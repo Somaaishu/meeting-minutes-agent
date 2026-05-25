@@ -44,7 +44,7 @@ app.post("/api/process", async (req, res) => {
     const { transcript } = req.body;
     if (!transcript) return res.status(400).json({ error: "No transcript provided" });
  
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
     const result = await model.generateContent(buildPrompt(transcript));
     const text = result.response.text();
     const cleaned = text.replace(/```json|```/g, "").trim();
@@ -64,7 +64,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     const transcript = fs.readFileSync(req.file.path, "utf8");
     fs.unlinkSync(req.file.path);
  
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
     const result = await model.generateContent(buildPrompt(transcript));
     const text = result.response.text();
     const cleaned = text.replace(/```json|```/g, "").trim();

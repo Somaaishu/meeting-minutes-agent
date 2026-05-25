@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Meeting Minutes AI Agent</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f5f5f5; color: #1a1a1a; }
+    .container { max-width: 860px; margin: 40px auto; padding: 0 20px; }
+    h1 { font-size: 1.6rem; font-weight: 600; margin-bottom: 8px; }
+    p.sub { color: #666; margin-bottom: 28px; }
+    .card { background: #fff; border-radius: 12px; padding: 24px; margin-bottom: 20px; border: 1px solid #e0e0e0; }
+    textarea { width: 100%; height: 160px; padding: 12px; border: 1px solid #d0d0d0; border-radius: 8px; font-size: 14px; resize: vertical; }
+    button { background: #4f46e5; color: #fff; border: none; padding: 10px 24px; border-radius: 8px; font-size: 15px; cursor: pointer; margin-top: 12px; }
+    button:hover { background: #3730a3; }
+    button:disabled { background: #a0a0a0; cursor: not-allowed; }
+    .section { margin-top: 24px; }
+    .section h2 { font-size: 1rem; font-weight: 600; margin-bottom: 10px; color: #4f46e5; }
+    .badge { display: inline-block; background: #eef2ff; color: #3730a3; padding: 4px 10px; border-radius: 20px; font-size: 13px; margin: 3px; }
+    .action-item { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; }
+    .action-item strong { color: #4f46e5; }
+    #output { display: none; }
+    .loading { color: #666; padding: 20px; text-align: center; }
+    .error { color: #dc2626; padding: 10px; background: #fef2f2; border-radius: 8px; margin-top: 10px; }
+    .export-bar { display: flex; gap: 10px; margin-top: 16px; }
+    .export-bar button { background: #059669; font-size: 13px; padding: 8px 16px; margin: 0; }
+    .tabs { display: flex; gap: 0; margin-bottom: 16px; border-bottom: 2px solid #e0e0e0; }
+    .tab { padding: 8px 20px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; font-size: 14px; color: #666; }
+    .tab.active { border-bottom-color: #4f46e5; color: #4f46e5; font-weight: 600; }
+    #paste-pane, #file-pane { display: none; }
+    #paste-pane.active, #file-pane.active { display: block; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>Meeting Minutes AI Agent</h1>
+  <p class="sub">Paste a transcript or upload a .txt file — get structured minutes instantly.</p>
+
+  <div class="card">
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('paste')">Paste Transcript</div>
+      <div class="tab" onclick="switchTab('file')">Upload File</div>
+    </div>
+
+    <div id="paste-pane" class="active">
+      <textarea id="transcript" placeholder="Paste your meeting transcript here...
+
+Example:
+John: Let's finalize the Q3 roadmap.
+Sarah: I suggest prioritizing the mobile app redesign.
+John: Agreed. Sarah, have a mockup ready by Friday?
+Sarah: Sure.
+John: Great. Meeting done."></textarea>
+      <button onclick="processText()" id="btn-text">Generate Minutes</button>
+    </div>
+
+    <div id="file-pane">
+      <p style="color:#666;font-size:14px;margin-bottom:8px">Upload a .txt file with your transcript.</p>
+      <input type="file" id="file-input" accept=".txt">
+      <br>
+      <button onclick="processFile()" id="btn-file">Upload & Generate</button>
+    </div>
+
+    <div id="error-msg" class="error" style="display:none"></div>
+  </div>
+
+  <div id="loading" style="display:none" class="card loading">Analyzing transcript with Gemini AI...</div>
+
+  <div id="output" class="card">
+    <div class="section"><h2>Summary</h2><p id="out-summary"></p></div>
+    <div class="section"><h2>Attendees</h2><div id="out-attendees"></div></div>
+    <div class="section"><h2>Key Points</h2><ul id="out-keypoints" style="padding-left:18px;line-height:2"></ul></div>
+    <div class="section"><h2>Decisions Made</h2><ul id="out-decisions" style="padding-left:18px;line-height:2"></ul></div>
+    <div class="section"><h2>Action Items</h2><div id="out-actions"></div></div>
+    <div class="section"><h2>Next Meeting</h2><p id="out-next"></p></div>
+    <div class="export-bar">
+      <button onclick="exportMarkdown()">Export as .md</button>
+      <button onclick="exportJSON()">Export as .json</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let lastMinutes = null;
+
+  function switchTab(tab) {
+    document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', (i===0&&tab==='paste')||(i===1&&tab==='file')));
+    document.getElementById('paste-pane').classList.toggle('active', tab==='paste');
+    document.getElementById('file-pane').classList.toggle('active', tab==='file');
+  }
+
+  async function processText() {
+    const transcript = document.getElementById('transcript').value.trim();
+    if (!transcript) return showError('Please paste a transcript first.');
+    setLoading(true);
+    try {
+      const res = await fetch('/api/process', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ transcript })
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      renderMinutes(data.minutes);
+    } catch(e) { showError(e.message); }
+    setLoading(false);
+  }
+
+  async function processFile() {
+    const file = document.getElementById('file-input').files[0];
+    if (!file) return showError('Please select a .txt file.');
+    setLoading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/upload', { method:'POST', body: fd });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      renderMinutes(data.minutes);
+    } catch(e) { showError(e.message); }
+    setLoading(false);
+  }
+
+  function renderMinutes(m) {
+    lastMinutes = m;
+    document.getElementById('out-summary').textContent = m.summary || '—';
+    document.getElementById('out-attendees').innerHTML = (m.attendees||[]).map(a=>`<span class="badge">${a}</span>`).join('');
+    document.getElementById('out-keypoints').innerHTML = (m.keyPoints||[]).map(k=>`<li>${k}</li>`).join('');
+    document.getElementById('out-decisions').innerHTML = (m.decisions||[]).map(d=>`<li>${d}</li>`).join('');
+    document.getElementById('out-actions').innerHTML = (m.actionItems||[]).map(a=>`
+      <div class="action-item">
+        <strong>${a.owner||'TBD'}</strong> — ${a.task}
+        <span style="float:right;font-size:12px;color:#888">${a.deadline||''}</span>
+      </div>`).join('');
+    document.getElementById('out-next').textContent = m.nextMeeting || 'Not scheduled';
+    document.getElementById('output').style.display = 'block';
+    document.getElementById('error-msg').style.display = 'none';
+  }
+
+  function exportMarkdown() {
+    if (!lastMinutes) return;
+    const m = lastMinutes;
+    const md = `# Meeting Minutes\n\n## Summary\n${m.summary}\n\n## Attendees\n${(m.attendees||[]).map(a=>`- ${a}`).join('\n')}\n\n## Key Points\n${(m.keyPoints||[]).map(k=>`- ${k}`).join('\n')}\n\n## Decisions\n${(m.decisions||[]).map(d=>`- ${d}`).join('\n')}\n\n## Action Items\n${(m.actionItems||[]).map(a=>`- **${a.owner}**: ${a.task} *(${a.deadline})*`).join('\n')}\n\n## Next Meeting\n${m.nextMeeting||'TBD'}`;
+    download('meeting-minutes.md', md);
+  }
+
+  function exportJSON() {
+    if (!lastMinutes) return;
+    download('meeting-minutes.json', JSON.stringify(lastMinutes, null, 2));
+  }
+
+  function download(filename, content) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([content]));
+    a.download = filename;
+    a.click();
+  }
+
+  function setLoading(on) {
+    document.getElementById('loading').style.display = on ? 'block' : 'none';
+    document.getElementById('btn-text').disabled = on;
+    document.getElementById('btn-file').disabled = on;
+    if (on) document.getElementById('output').style.display = 'none';
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('error-msg');
+    el.textContent = 'Error: ' + msg;
+    el.style.display = 'block';
+  }
+</script>
+</body>
+</html>
